@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import express from "express"
+import cors from "cors"
 import dotenv from "dotenv"
 import { DB_NAME,PORT } from "./constants.js";
 import ConnectDB from "./db/Connect.js";
@@ -7,6 +8,8 @@ const app=express()
 dotenv.config({
     path:'./env'
 })
+app.use(cors())
+app.use(express.json())
 ConnectDB()
 .then(()=>{
    app.on('error',(err)=>{
