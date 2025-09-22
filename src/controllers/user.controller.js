@@ -4,6 +4,7 @@ import { User } from "../models/user.model.js";
 import jwt, { NotBeforeError } from "jsonwebtoken"
 import {uploadFileOnCloudinary} from "../utils/Cloudinary.js"
 import { ApiResponse } from "../utils/ApiResponse.js";
+import mongoose from "mongoose";
 
 const generatedAccessTokenAndRefreshTokens=async(userId)=>{
 try {
@@ -165,7 +166,7 @@ const refreshAccessToken=asyncHandler(async(req,res)=>{
     }
     const decodedRefreshToken=jwt.verify(incomingRefreshToken,process.env.REFRESH_TOKEN_SECRET);
     if(!decodedRefreshToken){
-      throw new ApiError(400,"dToken!")
+      throw new ApiError(400,"Invalid Token!")
     }
     const user=await User.findById(decodedRefreshToken?._id)
     if(!user){
@@ -209,7 +210,7 @@ const updateUserDetails=asyncHandler(async(req,res)=>{
   .status(200)
   .json(new ApiResponse(200,user,"User details Successfully updated"))
 })
-const updatedUserPassword=asyncHandler(async(req,res)=>{
+const updateUserPassword=asyncHandler(async(req,res)=>{
  const {oldPassword,newPassword}= req.body;
  if(!oldPassword||!newPassword){
   throw new ApiError(400,"Password filled required!")
@@ -257,7 +258,7 @@ const updateUserAvatar=asyncHandler(async(req,res)=>{
    return res.status(200,user,"Avatar Image is Successfully Updated!")
 })
 
-const userCoverImageUpdate=asyncHandler(async(req,res)=>{
+const updateUserCoverImage=asyncHandler(async(req,res)=>{
   const coverImageLocalPath=req.file?.path;
   if(!coverImageLocalPath){
     throw new ApiError(400,"Cover Image is missing!")
@@ -277,4 +278,119 @@ const userCoverImageUpdate=asyncHandler(async(req,res)=>{
   ).select("-password")
   return res.status(200,user,"Cover Image is successfully updated")
 })
-export {userRegister,userLogin,userLogOut,refreshAccessToken,updateUserDetails,getCurrentUser,updatedUserPassword,userCoverImageUpdate,updateUserAvatar};
+
+const getUserProfileDetails=asyncHandler(async(req,res)=>{
+  const username=req.params;
+  if(!username){
+    throw new ApiError(400,"username is missing!")
+  }
+
+  const channel=await User.aggregate([
+    {
+     $match:username?.toLowerCase()
+    },
+    {
+      //find subscription--->
+      $lookup:{
+        from:"channel",
+        localField:"_id",
+        foreignField:"channel",
+        as:"subscribers"
+      }
+    },
+  {
+    //find subscribedTo--->
+    $lookup:{
+     from:"subscriber",
+      localField:"_id",
+      foreignField:"subscriber",
+      as:"subscribedTo"
+    }
+  },
+  {
+    $addFields:{
+    subscribedCount:{
+     $size:"$subscribers"
+    },
+    subscribedToCount:{
+      $size:"$subscribedTo"
+    },
+    isSubscribed:{
+      $cond:{
+        if:{
+          $in:[req.user?._id,"$subscribers.subscriber"],
+          then:true,
+          else:false
+        }
+      }
+    }
+  }
+},
+{
+  $project:{
+    username:1,
+    email:1,
+    avatar:1,
+    coverImage:1,
+    subscribedCount:1,
+    subscribedToCount:1,
+    fullName:1,
+  }
+}
+]
+  )
+  if (!channel?.length) {
+    throw new ApiError(404,"Channel doesn't exists!")
+  }
+  return res.status(200).json(new ApiResponse(200,channel[0],"User fetched successfully"))
+})
+const getWatchHistory=asyncHandler(async(req,res)=>{
+  const user=User.aggregate([
+    {
+      $match:{
+        //this is use because mongodb return _id-->as String so mongoose convert this String _id to proper _id so this process used
+        _id:mongoose.Types.ObjectId(req.user?._id)
+      }
+    },
+    {
+      $lookup:{
+        from:"videos",
+      localField:"watchHistory",
+      foreignField:"_id",
+      as:"watchHistory",
+      pipeline:[
+       {
+        $lookup:{
+          from:"users",
+          localField:"owner",
+          foreignField:"_id",
+          as:"owner",
+          pipeline:[
+            {
+              $project:{
+                username:1,
+                avatar:1,
+                coverImage:1,
+                fullName:1
+              }
+            }
+          ]
+        }
+       },
+       {
+        $addFields:{
+          owner:{
+            $first:"$owner"
+          }
+        }
+       }
+      ]
+      }
+    }
+  ])
+if(!user){
+  throw new ApiError(400,"Watch history is empty!")
+}
+return res.status(200).json(new ApiResponse(200,user[0],"Watch history fetched successfully"))
+})
+export {userRegister,userLogin,userLogOut,refreshAccessToken,updateUserDetails,getCurrentUser,updateUserPassword,updateUserCoverImage,updateUserAvatar,getUserProfileDetails,getWatchHistory};
